@@ -23,24 +23,29 @@ import (
 	"strconv"
 )
 
+// PP2PLink_Req_Message é a mensagem que a camada de cima envia para o PP2PLink enviar pela rede
 type PP2PLink_Req_Message struct {
-	To      string
-	Message string
+	To      string // endereço de destino (ip:porta)
+	Message string // conteúdo da mensagem
 }
 
+// PP2PLink_Ind_Message é a mensagem que o PP2PLink entrega para a camada de cima quando recebe algo da rede
 type PP2PLink_Ind_Message struct {
-	From    string
-	Message string
+	From    string // endereço de quem enviou
+	Message string // conteúdo da mensagem recebida
 }
 
+// PP2PLink é a estrutura principal do módulo de comunicação
 type PP2PLink struct {
-	Ind   chan PP2PLink_Ind_Message
-	Req   chan PP2PLink_Req_Message
-	Run   bool
-	dbg   bool
-	Cache map[string]net.Conn // cache de conexoes - reaproveita conexao com destino ao inves de abrir outra
+	Ind   chan PP2PLink_Ind_Message         // canal de INDICAÇÃO: PP2PLink → DIMEX (mensagens recebidas)
+	Req   chan PP2PLink_Req_Message         // canal de REQUISIÇÃO: DIMEX → PP2PLink (mensagens a enviar)
+	Run   bool                             // flag indicando se o módulo está ativo
+	dbg   bool                             // modo debug
+	Cache map[string]net.Conn              // cache de conexões TCP abertas (evita reconectar toda hora)
 }
 
+// NewPP2PLink cria e inicializa um novo módulo PP2PLink.
+// Recebe o endereço local (ip:porta) onde vai escutar conexões, e flag de debug.
 func NewPP2PLink(_address string, _dbg bool) *PP2PLink {
 	p2p := &PP2PLink{
 		Req:   make(chan PP2PLink_Req_Message, 1),
@@ -61,28 +66,32 @@ func (module *PP2PLink) outDbg(s string) {
 
 func (module *PP2PLink) Start(address string) {
 
-	// PROCESSO PARA RECEBIMENTO DE MENSAGENS
+	// GOROUTINE 1: LISTENER - recebe mensagens de outros processos
 	go func() {
+		// Abre um socket TCP escutando no endereço local
 		listen, _ := net.Listen("tcp4", address)
 		for {
-			// aceita repetidamente tentativas novas de conexao
+			// Aceita repetidamente tentativas novas de conexao
 			conn, err := listen.Accept()
 			module.outDbg("ok   : conexao aceita com outro processo.")
-			// para cada conexao lanca rotina de tratamento
+
+			// Para cada conexão aceita, lança uma goroutine de leitura
 			go func() {
-				// repetidamente recebe mensagens na conexao TCP (sem fechar)
-				// e passa para modulo de cima
-				for { //                              // enquanto conexao aberta
+				for { // recebe mensagens enquanto a conexão estiver aberta
 					if err != nil {
 						fmt.Println(".", err)
 						break
 					}
-					bufTam := make([]byte, 4) //       // le tamanho da mensagem
+
+					// 1. Lê os 4 primeiros bytes (tamanho da mensagem em texto)
+					bufTam := make([]byte, 4)
 					_, err := io.ReadFull(conn, bufTam)
 					if err != nil {
 						module.outDbg("erro : " + err.Error() + " conexao fechada pelo outro processo.")
 						break
 					}
+
+					// 2. Converte o tamanho para int e lê exatamente essa quantidade de bytes
 					tam, err := strconv.Atoi(string(bufTam))
 					bufMsg := make([]byte, tam)        // declara buffer do tamanho exato
 					_, err = io.ReadFull(conn, bufMsg) // le do tamanho do buffer ou da erro
@@ -90,31 +99,34 @@ func (module *PP2PLink) Start(address string) {
 						fmt.Println("@", err)
 						break
 					}
+
+					// 3. Monta a mensagem e repassa para a camada de cima (DIMEX) via canal Ind
 					msg := PP2PLink_Ind_Message{
 						From:    conn.RemoteAddr().String(),
 						Message: string(bufMsg)}
-					// ATE AQUI:  procedimentos para receber msg
-					module.Ind <- msg //               // repassa mensagem para modulo superior
+					module.Ind <- msg // repassa mensagem para modulo superior
 				}
 			}()
 		}
 	}()
 
-	// PROCESSO PARA ENVIO DE MENSAGENS
+	// GOROUTINE 2: SENDER — envia mensagens para outros processos
 	go func() {
 		for {
+			// Aguarda mensagem no canal Req (vinda do DIMEX) e envia
 			message := <-module.Req
 			module.Send(message)
 		}
 	}()
 }
 
+// Send envia uma mensagem para outro processo via TCP.
 func (module *PP2PLink) Send(message PP2PLink_Req_Message) {
 	var conn net.Conn
 	var ok bool
 	var err error
 
-	// ja existe uma conexao aberta para aquele destinatario?
+	// Verifica se já existe uma conexão aberta para o destino (cache)
 	if conn, ok = module.Cache[message.To]; ok {
 	} else { // se nao existe, abre e guarda na cache
 		conn, err = net.Dial("tcp", message.To)
@@ -125,11 +137,12 @@ func (module *PP2PLink) Send(message PP2PLink_Req_Message) {
 		}
 		module.Cache[message.To] = conn
 	}
-	// calcula tamanho da mensagem e monta string de 4 caracteres numericos com o tamanho.
-	// completa com 0s aa esquerda para fechar tamanho se necessario.
+
+	// Calcula o tamanho da mensagem e formata como string de 4 dígitos
+	// Ex: mensagem de 6 chars → "0006"
 	str := strconv.Itoa(len(message.Message))
 	for len(str) < 4 {
-		str = "0" + str
+		str = "0" + str // preenche com zeros à esquerda
 	}
 	if !(len(str) == 4) {
 		module.outDbg("ERROR AT PPLINK MESSAGE SIZE CALCULATION - INVALID MESSAGES MAY BE IN TRANSIT")

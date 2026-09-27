@@ -3,6 +3,7 @@
 /* fmt.Println("go run useDIMEX.go 0 127.0.0.1:5000  127.0.0.1:6001  127.0.0.1:7002 ")
    fmt.Println("go run useDIMEX.go 1 127.0.0.1:5000  127.0.0.1:6001  127.0.0.1:7002 ")
    fmt.Println("go run useDIMEX.go 2 127.0.0.1:5000  127.0.0.1:6001  127.0.0.1:7002 ")
+*/
 /*
   LANCAR N PROCESSOS EM SHELL's DIFERENTES, UMA PARA CADA PROCESSO.
   para cada processo: seu id único e a mesma lista de processos.
@@ -43,11 +44,11 @@ func main() {
 
 	for {
 		fmt.Println("[ APP id: ", id, " PEDE   MX ]")
-		dmx.Req <- DIMEX.ENTER
+		dmx.Req <- DIMEX.ENTER         // pede entrada na SC
 		fmt.Println("[ APP id: ", id, " ESPERA MX ]")
-		<-dmx.Ind //
+		<-dmx.Ind                      // aguarda permissão
 		fmt.Println("[ APP id: ", id, " *EM*   MX ]")
-		dmx.Req <- DIMEX.EXIT //
+		dmx.Req <- DIMEX.EXIT          // libera a SC
 		fmt.Println("[ APP id: ", id, " FORA   MX ]")
 	}
 }

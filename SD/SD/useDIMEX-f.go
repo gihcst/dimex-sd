@@ -38,6 +38,7 @@ import (
 
 func main() {
 
+	// Validação de argumentos: precisa do id + lista de endereços
 	if len(os.Args) < 2 {
 		fmt.Println("Please specify at least one address:port!")
 		fmt.Println("go run useDIMEX-f.go 0 127.0.0.1:5000  127.0.0.1:6001  127.0.0.1:7002 ")
@@ -46,35 +47,39 @@ func main() {
 		return
 	}
 
+	// Lê o id do processo e a lista de endereços dos argumentos
 	id, _ := strconv.Atoi(os.Args[1])
 	addresses := os.Args[2:]
 	fmt.Print("id: ", id, "   ")
 	fmt.Println(addresses)
 
+	// Cria o módulo DIMEX (que internamente cria o PP2PLink e começa a escutar)
 	var dmx *DIMEX.DIMEX_Module = DIMEX.NewDIMEX(addresses, id, true)
 	fmt.Println(dmx)
 
-	// abre arquivo que TODOS processos devem poder usar
+	// Abre arquivo que TODOS os processos devem poder usar
 	file, err := os.OpenFile("./mxOUT.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		fmt.Println("Error opening file:", err)
 		return
 	}
-	defer file.Close() // Ensure the file is closed at the end of the function
+	defer file.Close()
 
-	// espera para facilitar inicializacao de todos processos (a mao)
+	// Aguarda 3 segundos para facilitar inicializacao de todos processos (a mão)
 	time.Sleep(3 * time.Second)
 
+	// Loop principal: acessa a SC repetidamente
 	for {
-		// SOLICITA ACESSO AO DIMEX
+		// PASSO 1: Pede acesso à seção crítica
 		fmt.Println("[ APP id: ", id, " PEDE   MX ]")
-		dmx.Req <- DIMEX.ENTER
-		fmt.Println("[ APP id: ", id, " ESPERA MX ]")
-		// ESPERA LIBERACAO DO MODULO DIMEX
-		<-dmx.Ind //
+		dmx.Req <- DIMEX.ENTER // envia pedido de ENTRADA para o módulo DIMEX
 
-		// A PARTIR DAQUI ESTA ACESSANDO O ARQUIVO SOZINHO
-		_, err = file.WriteString("|") // marca entrada no arquivo
+		// PASSO 2: Aguarda permissão (bloqueia até receber)
+		fmt.Println("[ APP id: ", id, " ESPERA MX ]")
+		<-dmx.Ind // bloqueia aqui até o DIMEX sinalizar que pode entrar
+
+		// SEÇÃO CRÍTICA COMEÇA AQUI
+		_, err = file.WriteString("|") // escreve "|" marcando ENTRADA na SC
 		if err != nil {
 			fmt.Println("Error writing to file:", err)
 			return
@@ -82,14 +87,15 @@ func main() {
 
 		fmt.Println("[ APP id: ", id, " *EM*   MX ]")
 
-		_, err = file.WriteString(".") // marca saida no arquivo
+		_, err = file.WriteString(".") // escreve "." marcando SAÍDA da SC
 		if err != nil {
 			fmt.Println("Error writing to file:", err)
 			return
 		}
+		// SEÇÃO CRÍTICA TERMINA AQUI
 
-		// AGORA VAI LIBERAR O ARQUIVO PARA OUTROS
-		dmx.Req <- DIMEX.EXIT //
+		// PASSO 3: Libera a seção crítica
+		dmx.Req <- DIMEX.EXIT
 		fmt.Println("[ APP id: ", id, " FORA   MX ]")
 	}
 }
