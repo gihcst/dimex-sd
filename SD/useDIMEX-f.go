@@ -68,8 +68,26 @@ func main() {
 	// Aguarda 3 segundos para facilitar inicializacao de todos processos (a mão)
 	time.Sleep(3 * time.Second)
 
+	// Se for o processo 0: dispara snapshots sucessivos concorrentemente aos acessos da aplicação
+	if id == 0 {
+		go func() {
+			time.Sleep(2 * time.Second) // aguarda todos os processos começarem o ciclo
+			totalSnapshots := 300
+			fmt.Printf("\n[ SNAPSHOT ] Processo 0 iniciando coleta de %d snapshots...\n\n", totalSnapshots)
+
+			for snId := 1; snId <= totalSnapshots; snId++ {
+				time.Sleep(40 * time.Millisecond) // intervalo entre disparos sucessivos
+				dmx.StartSnapshot(snId)
+			}
+			fmt.Printf("\n[ SNAPSHOT ] Processo 0 concluiu o disparo de todos os %d snapshots!\n\n", totalSnapshots)
+		}()
+	}
+
 	// Loop principal: acessa a SC repetidamente
 	for {
+		// Intervalo fora da SC para promover entrelaçamento e mensagens em trânsito
+		time.Sleep(20 * time.Millisecond)
+
 		// PASSO 1: Pede acesso à seção crítica
 		fmt.Println("[ APP id: ", id, " PEDE   MX ]")
 		dmx.Req <- DIMEX.ENTER // envia pedido de ENTRADA para o módulo DIMEX
@@ -86,6 +104,7 @@ func main() {
 		}
 
 		fmt.Println("[ APP id: ", id, " *EM*   MX ]")
+		time.Sleep(10 * time.Millisecond) // tempo de permanência na SC
 
 		_, err = file.WriteString(".") // escreve "." marcando SAÍDA da SC
 		if err != nil {

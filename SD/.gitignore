@@ -1,2 +1,3 @@
 *.exe
 mxOUT.txt
+snapshot_proc_*.jsonl
