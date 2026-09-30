@@ -41,7 +41,7 @@ type dmxResp struct{}
 type FaultMode int
 
 const (
-	FaultViolateSC
+	FaultViolateSC = iota
 	FaultBlockSC
 	FaultRandom
 )
