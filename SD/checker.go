@@ -11,6 +11,8 @@
 	  Inv 4: Conservação de Permissões (para q em wantMX: nbrResps + respOK_trânsito + waitings + reqEntry_trânsito = N-1)
 	  Inv 5: Permissões da SC (se p está em inMX: nbrResps == N-1 e ninguém tem p em waiting)
 	  Inv 6: Consistência Temporal (se p está em wantMX: reqTs <= lcl)
+	  Inv 7: Ausência de Bloqueio Circular / Deadlock (não pode haver waiting recíproco entre p e q)
+	  Inv 8: Respeito à Prioridade de Requisição (se p pediu antes de q, q não pode ter p em waiting)
 */
 
 package main
@@ -199,6 +201,59 @@ func Inv6_ClockConsistency(snap GlobalSnapshot) (bool, string) {
 	return true, ""
 }
 
+// Inv7_NoCircularWait: em Ricart-Agrawala, a relação de prioridade é estrita.
+// Dois processos NUNCA podem estar na fila de espera um do outro simultaneamente.
+// A ocorrência de espera recíproca (waiting[p][q] && waiting[q][p]) caracteriza Bloqueio Circular (Deadlock).
+func Inv7_NoCircularWait(snap GlobalSnapshot) (bool, string) {
+	for pId, pProc := range snap.Processes {
+		for qId, isWaiting := range pProc.Waiting {
+			if isWaiting && pId < qId { // avalia cada par (p, q) uma única vez
+				if qProc, ok := snap.Processes[qId]; ok {
+					if len(qProc.Waiting) > pId && qProc.Waiting[pId] {
+						return false, fmt.Sprintf("Bloqueio Circular (Deadlock) detectado: processo %d e processo %d estão em espera mútua (waiting[%d][%d]=true e waiting[%d][%d]=true)",
+							pId, qId, pId, qId, qId, pId)
+					}
+				}
+			}
+		}
+	}
+	return true, ""
+}
+
+// Inv8_PriorityWait: se p e q estão em wantMX, e p pediu antes de q (tem prioridade),
+// q não pode ter p na sua fila de waiting (violação da regra de concessão do Ricart-Agrawala).
+func Inv8_PriorityWait(snap GlobalSnapshot) (bool, string) {
+	for pId, pProc := range snap.Processes {
+		if pProc.State != "wantMX" {
+			continue
+		}
+		for qId, qProc := range snap.Processes {
+			if qId == pId || qProc.State != "wantMX" {
+				continue
+			}
+			// Se p tem prioridade sobre q (pediu antes):
+			if before(pId, pProc.ReqTs, qId, qProc.ReqTs) {
+				// Processo q não tem direito de reter p na fila!
+				if len(qProc.Waiting) > pId && qProc.Waiting[pId] {
+					return false, fmt.Sprintf("Bloqueio Indevido: processo %d pediu antes de %d (reqTs: %d < %d), mas processo %d reteve permissão indevidamente (waiting[%d]=true)",
+						pId, qId, pProc.ReqTs, qProc.ReqTs, qId, pId)
+				}
+			}
+		}
+	}
+	return true, ""
+}
+
+func before(oneId, oneTs, othId, othTs int) bool {
+	if oneTs < othTs {
+		return true
+	} else if oneTs > othTs {
+		return false
+	} else {
+		return oneId < othId
+	}
+}
+
 // ------------------------------------------------------------------------------------
 // ------- carregamento e avaliação dos snapshots
 // ------------------------------------------------------------------------------------
@@ -283,6 +338,8 @@ func main() {
 		{"Inv 4 (Conservação de Permissões)", Inv4_PermissionConservation},
 		{"Inv 5 (Permissões da SC)", Inv5_InMXPermissions},
 		{"Inv 6 (Consistência Temporal)", Inv6_ClockConsistency},
+		{"Inv 7 (Ausência de Bloqueio Circular / Deadlock)", Inv7_NoCircularWait},
+		{"Inv 8 (Respeito à Prioridade de Requisição)", Inv8_PriorityWait},
 	}
 
 	validSnapshots := 0
@@ -378,11 +435,11 @@ func main() {
 	fmt.Println("--------------------------------------------------------------------------------")
 	fmt.Println("                            RESULTADO DA AVALIAÇÃO                              ")
 	fmt.Println("--------------------------------------------------------------------------------")
-	fmt.Printf("Snapshots analisados (completos) : %d\n", validSnapshots+violatedSnapshots)
-	fmt.Printf("Snapshots válidos (sem violação) : %d (%.2f%%)\n",
+	fmt.Printf("Snapshots analisados (completos): %d\n", validSnapshots+violatedSnapshots)
+	fmt.Printf("Snapshots válidos (sem violação): %d (%.2f%%)\n",
 		validSnapshots,
 		float64(validSnapshots)/float64(validSnapshots+violatedSnapshots)*100)
-	fmt.Printf("Snapshots com violações          : %d\n", violatedSnapshots)
+	fmt.Printf("Snapshots com violações         : %d\n", violatedSnapshots)
 	if incompleteSnapshots > 0 {
 		fmt.Printf("Snapshots incompletos (descarte) : %d\n", incompleteSnapshots)
 	}
@@ -396,12 +453,12 @@ func main() {
 	if len(violations) > 0 {
 		fmt.Println("\n[ATENÇÃO] Violações encontradas:")
 		for i, v := range violations {
-			if i < 15 { // Limita exibição das primeiras 15 violações
+			if i < 15 {
 				fmt.Printf("  [Snapshot %d] %s: %s\n", v.SnId, v.InvName, v.Detail)
 			}
 		}
 		if len(violations) > 15 {
-			fmt.Printf("  ... e mais %d violações adicionais.\n", len(violations)-15)
+			fmt.Printf("e mais %d violações adicionais.\n", len(violations)-15)
 		}
 		fmt.Println("\nStatus: FALHA (foram encontradas inconsistências nos snapshots).")
 		os.Exit(1)
@@ -412,6 +469,5 @@ func main() {
 }
 
 func init() {
-	// Apenas para evitar warnings de imports não utilizados se necessário
 	_ = strconv.Itoa
 }

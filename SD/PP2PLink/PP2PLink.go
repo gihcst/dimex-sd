@@ -37,11 +37,11 @@ type PP2PLink_Ind_Message struct {
 
 // PP2PLink é a estrutura principal do módulo de comunicação
 type PP2PLink struct {
-	Ind   chan PP2PLink_Ind_Message         // canal de INDICAÇÃO: PP2PLink → DIMEX (mensagens recebidas)
-	Req   chan PP2PLink_Req_Message         // canal de REQUISIÇÃO: DIMEX → PP2PLink (mensagens a enviar)
-	Run   bool                             // flag indicando se o módulo está ativo
-	dbg   bool                             // modo debug
-	Cache map[string]net.Conn              // cache de conexões TCP abertas (evita reconectar toda hora)
+	Ind   chan PP2PLink_Ind_Message // canal de INDICAÇÃO: PP2PLink → DIMEX (mensagens recebidas)
+	Req   chan PP2PLink_Req_Message // canal de REQUISIÇÃO: DIMEX → PP2PLink (mensagens a enviar)
+	Run   bool                      // flag indicando se o módulo está ativo
+	dbg   bool                      // modo debug
+	Cache map[string]net.Conn       // cache de conexões TCP abertas (evita reconectar toda hora)
 }
 
 // NewPP2PLink cria e inicializa um novo módulo PP2PLink.
@@ -65,38 +65,48 @@ func (module *PP2PLink) outDbg(s string) {
 }
 
 func (module *PP2PLink) Start(address string) {
+	// Abre um socket TCP escutando no endereço local
+	listen, err := net.Listen("tcp4", address)
+	if err != nil {
+		fmt.Printf(". . . . . . . . . . . . . . . . . [ PP2PLink msg : erro ao abrir listener em %s: %v ]\n", address, err)
+		return
+	}
 
 	// GOROUTINE 1: LISTENER - recebe mensagens de outros processos
 	go func() {
-		// Abre um socket TCP escutando no endereço local
-		listen, _ := net.Listen("tcp4", address)
 		for {
 			// Aceita repetidamente tentativas novas de conexao
 			conn, err := listen.Accept()
+			if err != nil {
+				module.outDbg("erro : " + err.Error() + " ao aceitar conexao.")
+				return
+			}
 			module.outDbg("ok   : conexao aceita com outro processo.")
 
 			// Para cada conexão aceita, lança uma goroutine de leitura
-			go func() {
+			go func(conn net.Conn) {
 				for { // recebe mensagens enquanto a conexão estiver aberta
-					if err != nil {
-						fmt.Println(".", err)
-						break
-					}
-
 					// 1. Lê os 4 primeiros bytes (tamanho da mensagem em texto)
 					bufTam := make([]byte, 4)
 					_, err := io.ReadFull(conn, bufTam)
 					if err != nil {
 						module.outDbg("erro : " + err.Error() + " conexao fechada pelo outro processo.")
+						_ = conn.Close()
 						break
 					}
 
 					// 2. Converte o tamanho para int e lê exatamente essa quantidade de bytes
 					tam, err := strconv.Atoi(string(bufTam))
+					if err != nil {
+						module.outDbg("erro : " + err.Error() + " ao converter tamanho da mensagem.")
+						_ = conn.Close()
+						break
+					}
 					bufMsg := make([]byte, tam)        // declara buffer do tamanho exato
 					_, err = io.ReadFull(conn, bufMsg) // le do tamanho do buffer ou da erro
 					if err != nil {
 						fmt.Println("@", err)
+						_ = conn.Close()
 						break
 					}
 
@@ -106,7 +116,7 @@ func (module *PP2PLink) Start(address string) {
 						Message: string(bufMsg)}
 					module.Ind <- msg // repassa mensagem para modulo superior
 				}
-			}()
+			}(conn)
 		}
 	}()
 

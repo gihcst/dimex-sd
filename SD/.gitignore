@@ -1,3 +1,5 @@
 *.exe
+dimad
+dimex-f
 mxOUT.txt
 snapshot_proc_*.jsonl
