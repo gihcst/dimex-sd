@@ -41,7 +41,7 @@ type dmxResp struct{}
 type FaultMode int
 
 const (
-	FaultViolateSC = iota
+	FaultViolateSC FaultMode = iota
 	FaultBlockSC
 	FaultRandom
 )
@@ -421,9 +421,10 @@ func before(oneId, oneTs, othId, othTs int) bool {
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Println("Uso: go run ./DIMAD <id> <endereco...>")
-		fmt.Println("Exemplo: go run ./DIMAD 0 127.0.0.1:5000 127.0.0.1:6001 127.0.0.1:7002")
+	if len(os.Args) < 4 {
+		fmt.Println("Uso: ./dimad <id> <faultMode> <endereco...>")
+		fmt.Println("Exemplo: ./dimad 0 violate 127.0.0.1:5000 127.0.0.1:6001 127.0.0.1:7002")
+		fmt.Println("faultMode: violate | block | random")
 		return
 	}
 
@@ -433,14 +434,17 @@ func main() {
 		return
 	}
 
-	addresses := os.Args[2:]
+	faultMode := os.Args[2]   // ex: "violate", "block", "random"
+	addresses := os.Args[3:]  // endereços reais a partir do índice 3
+
 	if len(addresses) == 0 {
 		fmt.Println("forneça pelo menos um endereço de destino")
 		return
 	}
 
 	dmx := DIMAD(addresses, id, true)
-	fmt.Printf("DIMAD pronto: processo %d | enderecos=%v\n", id, addresses)
+	dmx.SetFaultMode(faultMode)
+	fmt.Printf("DIMAD pronto: processo %d | faultMode=%s | enderecos=%v\n", id, faultMode, addresses)
 
 	file, err := os.OpenFile("./mxOUT.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {

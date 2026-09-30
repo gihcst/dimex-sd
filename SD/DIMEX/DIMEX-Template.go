@@ -319,7 +319,7 @@ func (module *DIMEX_Module) handleUponDeliverReqEntry(msgOutro PP2PLink.PP2PLink
 }
 
 // ------------------------------------------------------------------------------------
-// ------- Algoritmo de Chandy-Lamport (Distributed Snapshot)
+// ------- algoritmo de Chandy-Lamport (Distributed Snapshot)
 // ------------------------------------------------------------------------------------
 
 // StartSnapshot solicita que este processo inicie um snapshot distribuído com o id informado
